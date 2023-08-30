@@ -1,0 +1,105 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mongodb-backup
+spec:
+  schedule: "* * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          volumes:
+            - name: backup-volume
+              emptyDir: {}
+          containers:
+            - name: backup
+              image: mongo:latest
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  BACKUP_DATE="$(date +'%Y-%m-%d_%H-%M-%S')"
+                  FULL_BACKUP_VERSION="${BACKUP_VERSION}_${BACKUP_DATE}"
+                  echo $FULL_BACKUP_VERSION > /config/BACKUP_NAME
+                  mongodump --host $(DB_SERVER) --port 27017 --username root --password $(DB_PASS) --out "/backup/mongo/${FULL_BACKUP_VERSION}"
+              volumeMounts:
+                - name: backup-volume
+                  mountPath: /backup/mongo
+                - name: backup-volume
+                  mountPath: /config
+              env:
+                - name: DB_SERVER
+                  value: mongodb-{{ .Release.Namespace }}-srv
+                - name: DB_PASS
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Chart.Name }}-{{ .Release.Namespace }}-secret
+                      key: dbPass
+                - name: BACKUP_VERSION
+                  value: {{ .Values.image.env.backupVersion }}
+            - name: compress
+              image: busybox:latest
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  BACKUP_DIR=/backup/mongo
+                  # Set the value of ENV_VAR
+                  export BACKUP_NAME=$(cat /config/BACKUP_NAME)
+
+                  # Access the environment variable
+                  echo "Value of BACKUP_NAME: $BACKUP_NAME"
+
+                  # enter into the backup directory
+                  # decompress the file with  tar -zcvf TEST.tar.gz TEST.
+                  # compress the file with the command tar -xvzf TEST.tar.gz.
+                  cd $BACKUP_DIR
+
+                  # compress the file
+                  tar -zcvf ${BACKUP_NAME}.tar.gz $BACKUP_NAME
+
+              volumeMounts:
+                - name: backup-volume
+                  mountPath: /backup/mongo
+                - name: backup-volume
+                  mountPath: /config
+            - name: upload
+              image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  BACKUP_DIR=/backup/mongo
+                  # Set the value of ENV_VAR
+                  export BACKUP_NAME=$(cat /config/BACKUP_NAME)
+
+                  # Access the environment variable
+                  echo "Value of BACKUP_NAME: $BACKUP_NAME"
+
+                  linode-cli --cluster=${CLUSTER} obj put ${BACKUP_DIR}/${BACKUP_NAME}.tar.gz ${BUCKET_NAME}
+
+              volumeMounts:
+                - name: backup-volume
+                  mountPath: /backup/mongo
+                - name: backup-volume
+                  mountPath: /config
+              env:
+                - name: LINODE_CLI_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Chart.Name }}-{{ .Release.Namespace }}-secret
+                      key: linodeCliToken
+                - name: LINODE_CLI_OBJ_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Chart.Name }}-{{ .Release.Namespace }}-secret
+                      key: linodeCliObjAccessKey
+                - name: LINODE_CLI_OBJ_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Chart.Name }}-{{ .Release.Namespace }}-secret
+                      key: linodeCliObjSecretKey
+                - name: CLUSTER
+                  value: {{ .Values.image.env.cluster }}
+                - name: BUCKET_NAME
+                  value: {{ .Values.image.env.bucketName }}
+                - name: FOLDER_PATH
+                  value: {{ .Values.image.env.folderPath }}
+          restartPolicy: OnFailure

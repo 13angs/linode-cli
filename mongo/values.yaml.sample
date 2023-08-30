@@ -1,0 +1,20 @@
+# Default values for cronjob.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+image:
+  repository: 13angs/linode-cli
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: latest
+  env:
+    linodeCliToken: ''
+    linodeCliObjAccessKey: ''
+    linodeCliObjSecretKey: ''
+    dbPass: ''
+    backupVersion: 'v0.8.4'
+    cluster: ap-south-1
+    bucketName: ''
+    folderPath: 'dbs/mongo'
